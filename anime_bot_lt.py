@@ -1,3 +1,10 @@
+"""Код Телеграм бота.
+
+Запрашивает картинки с АПИ и присылает в чат.
+Имеет две версии FULL и LITE.
+Для полной версии нужно иметь файл full_version.py.
+"""
+
 import logging
 import os
 import sys
@@ -13,12 +20,32 @@ from exceptions import Error
 
 load_dotenv()
 
-secret_token = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 
+def version_bot():
+    """Определяет версию работы  бота: full или lite.
+
+    Проверяя наличие файла full_version.py.
+    Импортирует константы, в зависимости от версии.
+    """
+    if os.path.isfile('full_version.py') and os.getenv('FULL'):
+        FULL = True
+        from full_version import URLS_FULL, BUTTON_FULL, BOT_COMMANDS_FULL
+    else:
+        FULL = False
+        from lt_version import URLS_LITE, BUTTON_LITE, BOT_COMMANDS_LITE
+
+    URLS = URLS_FULL if FULL else URLS_LITE
+    BUTTON_KEYS = BUTTON_FULL if FULL else BUTTON_LITE
+    BOT_COMMANDS = BOT_COMMANDS_FULL if FULL else BOT_COMMANDS_LITE
+
+    return URLS, BUTTON_KEYS, BOT_COMMANDS
+
+
 def get_logger():
-    """Задаём параметры логирования."""
+    """Задаёт параметры логирования."""
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
     streamHandler = logging.StreamHandler(stream=sys.stdout)
@@ -30,28 +57,8 @@ def get_logger():
     return logger
 
 
-URLS = {
-    '/new_waifu': (
-        'https://api.waifu.im/search/',
-        'Waifu'
-    ),
-    '/maid': (
-        'https://api.waifu.im/search/?&included_tags=maid',
-        'Maid'
-    ),
-    '/raiden_shogun': (
-        'https://api.waifu.im/search/?included_tags=raiden-shogun',
-        'Raiden_shogun'
-    ),
-    '/uniform': (
-        'https://api.waifu.im/search/?gif=false&included_tags=uniform',
-        'Uniform',
-    ),
-}
-
-
 def say_hi(update, context):
-    """Скажи привет."""
+    """Приветствие бота."""
     chat = update.effective_chat
     if chat.id == int(TELEGRAM_CHAT_ID):
         context.bot.send_message(chat_id=chat.id, text='Привет, я АнимеБот!')
@@ -62,7 +69,7 @@ def say_hi(update, context):
 
 
 def length_count(random_image):
-    """Расчёт размера файла."""
+    """Расчёт размера файла в запросе."""
     header = requests.head(random_image)
     content_length = header.headers.get('content-length')
     length_mb = int(content_length) / 1024 / 1024
@@ -123,7 +130,9 @@ def new_image(update, context):
                     rgb_im = image.convert('RGB')
                     rgb_im.save(os.path.join('media', 'anime_RGB.jpg'))
 
-                    photo = open(os.path.join(os.path.join('media', 'anime_RGB.jpg')), 'rb')
+                    photo = open(os.path.join(
+                        os.path.join('media', 'anime_RGB.jpg')
+                    ), 'rb')
                     text_2 = text + ' <resize>'
                     context.bot.send_photo(chat.id, photo, text_2)
                     os.remove(os.path.join('media', 'anime.jpg'))
@@ -139,7 +148,7 @@ def new_image(update, context):
 
 
 def wake_up(update, context):
-    """Старт."""
+    """Старт бота."""
     chat = update.effective_chat
     name = update.message.chat.first_name
     button = ReplyKeyboardMarkup([
@@ -171,7 +180,9 @@ def clear_history(update, context):
     print(new_message_id)
     while new_message_id > 1:
         try:
-            context.bot.delete_message(chat_id=update.message.chat_id, message_id=new_message_id)
+            context.bot.delete_message(
+                chat_id=update.message.chat_id, message_id=new_message_id
+            )
         except Exception as error:
             print(f'Message_id does not exist: {new_message_id} - {error}')
             break
@@ -179,12 +190,9 @@ def clear_history(update, context):
 
 
 def tags_mode(update, context):
+    """Выводит на экран бота дополнительные кнопки запросов."""
     chat = update.effective_chat
-    button = ReplyKeyboardMarkup([
-        ['/clear_history'],
-        ['/uniform', '/maid', ],
-        ['/raiden_shogun', '/new_waifu', ],
-    ], resize_keyboard=True)
+    button = ReplyKeyboardMarkup(BUTTON_KEYS, resize_keyboard=True)
     context.bot.send_message(
         chat_id=chat.id,
         text='tags_mode activated.',
@@ -195,33 +203,21 @@ def tags_mode(update, context):
 def main():
     """Главная работа бота."""
     try:
-        updater = Updater(token=secret_token)
+        updater = Updater(token=TELEGRAM_TOKEN)
         updater.dispatcher.add_handler(CommandHandler(
-            'start', wake_up,
-            Filters.user(user_id=int(TELEGRAM_CHAT_ID))
+            command='start', callback=wake_up,
+            filters=Filters.user(user_id=int(TELEGRAM_CHAT_ID))
         ))
         updater.dispatcher.add_handler(CommandHandler(
             'tags_mode', tags_mode,
             Filters.user(user_id=int(TELEGRAM_CHAT_ID))
         ))
         updater.dispatcher.add_handler(CommandHandler(
-            'maid', new_image,
-            Filters.user(user_id=int(TELEGRAM_CHAT_ID))
-        ))
-        updater.dispatcher.add_handler(CommandHandler(
-            'raiden_shogun', new_image,
+            LIST, new_image,
             Filters.user(user_id=int(TELEGRAM_CHAT_ID))
         ))
         updater.dispatcher.add_handler(CommandHandler(
             'clear_history', clear_history,
-            Filters.user(user_id=int(TELEGRAM_CHAT_ID))
-        ))
-        updater.dispatcher.add_handler(CommandHandler(
-            'uniform', new_image,
-            Filters.user(user_id=int(TELEGRAM_CHAT_ID))
-        ))
-        updater.dispatcher.add_handler(CommandHandler(
-            'new_waifu', new_image,
             Filters.user(user_id=int(TELEGRAM_CHAT_ID))
         ))
         updater.dispatcher.add_handler(MessageHandler(
@@ -238,9 +234,10 @@ def main():
 
 if __name__ == '__main__':
     logger = get_logger()
+    URLS, BUTTON_KEYS, LIST = version_bot()
     try:
         logger.info('Запуск программы')
         main()
     except KeyboardInterrupt:
         logger.info('Выход из программы с клавиатуры')
-        sys.exit(0)
+        sys.exit('Выход из программы с клавиатуры')
