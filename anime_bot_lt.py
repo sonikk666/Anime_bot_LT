@@ -68,74 +68,103 @@ def say_hi(update, context):
         )
 
 
-def length_count(random_image):
-    """Расчёт размера файла в запросе."""
-    header = requests.head(random_image)
-    content_length = header.headers.get('content-length')
-    length_mb = int(content_length) / 1024 / 1024
-    length = round(length_mb, 1)
-    return length
-
-
 def get_new_image(url):
     """Получает новую картинку."""
+    params = [
+        'byte_size',
+        'height',
+        'url',
+        'width',
+    ]
     while True:
         try:
             response = requests.get(url).json()
-            random_waifu = response.get('images')[0].get('url')
+            full_info = response.get('images')[0]
 
-            tags = response.get('images')[0].get('tags')
-            tag_list = []
-            for tag in tags:
-                tag_name = tag.get('name')
-                tag_list.append(tag_name)
-            text = (', #'.join(tag_list))
-            text = f'#{text}'
+            image_info = {
+                key: full_info[key] for key in full_info if key in params
+            }
 
-            tuple = (random_waifu, text.upper())
-            return tuple
+            tag_list = ['#'+x['name'] for x in full_info['tags']]
+            image_info['tags'] = ', '.join(tag_list).upper()
+
+            logger.info(image_info)
+
+            return image_info
 
         except Error as error:
             logger.debug(f'{error}')
 
 
+def convert_image(url_image):
+    """Конвертирует изображение в RGB формат.
+
+    Сначала сохраняет его в папку, потом конвертирует
+    и удаляет оригинал.
+    """
+    path_to_file = os.path.join('media', 'anime.jpg')
+
+    request = requests.get(url_image)
+
+    with open(path_to_file, 'wb') as file:
+        file.write(request.content)
+
+    image = Image.open(path_to_file)
+    rgb_im = image.convert('RGB')
+    rgb_im.save(os.path.join('media', 'anime_RGB.jpg'))
+
+    photo = open(os.path.join(
+        os.path.join('media', 'anime_RGB.jpg')
+    ), 'rb')
+    os.remove(os.path.join('media', 'anime.jpg'))
+
+    return photo
+
+
+def create_message(image_info, name_image, counter):
+    """Формирует текстовое сообщение - информацию о картинке."""
+    width = image_info.get('width')
+    height = image_info.get('height')
+    byte_size = image_info['byte_size']
+    tags_image = image_info.get('tags')
+
+    mb_size = round(byte_size / 1024 / 1024, 1)
+
+    text = (
+        f'{name_image} №{counter} {tags_image}'
+        f'\n({width}x{height} pix, {mb_size} Mb)'
+    )
+
+    return text
+
+
 def new_image(update, context):
     """Отправляет картинку в чат."""
-    counter = 0
+    counter = 1
     try:
-        while counter < 5:
+        while counter <= 5:
             try:
                 chat = update.effective_chat
-                url = URLS.get(update.message.text)[0]
-                name = URLS.get(update.message.text)[1]
-                image_tuple = get_new_image(url)
-                image_photo = image_tuple[0]
-                image_tag = image_tuple[1]
 
-                text = f'{name} №{counter+1} {image_tag}'
+                url, name = URLS.get(update.message.text)
 
-                if length_count(image_photo) < 5:
-                    context.bot.send_photo(chat.id, image_photo, text)
+                image_info = get_new_image(url)
+                text = create_message(image_info, name, counter)
+
+                url_image = image_info.get('url')
+
+                # Если изображение больше 5 Мб, конвертируем его в RGB
+                if image_info['byte_size'] < 5*1024*1024:
+                    context.bot.send_photo(chat.id, url_image, text)
                 else:
-                    logger.debug(f'Попался большой файл {image_photo}')
-                    url = image_photo
-                    path = os.path.join('media', 'anime.jpg')
+                    logger.debug(f'Попался большой файл {url_image}')
+                    image_in_folder = convert_image(url_image)
 
-                    request = requests.get(url)
+                    text += ' <resize>'
+                    context.bot.send_photo(chat.id, image_in_folder, text)
+                    image_in_folder.close()
 
-                    with open(path, 'wb') as file:
-                        file.write(request.content)
-
-                    image = Image.open(path)
-                    rgb_im = image.convert('RGB')
-                    rgb_im.save(os.path.join('media', 'anime_RGB.jpg'))
-
-                    photo = open(os.path.join(
-                        os.path.join('media', 'anime_RGB.jpg')
-                    ), 'rb')
-                    text_2 = text + ' <resize>'
-                    context.bot.send_photo(chat.id, photo, text_2)
-                    os.remove(os.path.join('media', 'anime.jpg'))
+                    os.remove(os.path.join('media', 'anime_RGB.jpg'))
 
                 time.sleep(0.2)
                 counter = counter + 1
@@ -161,7 +190,7 @@ def wake_up(update, context):
         reply_markup=button
     )
     url = URLS.get('/new_waifu')[0]
-    context.bot.send_photo(chat.id, get_new_image(url)[0])
+    context.bot.send_photo(chat.id, get_new_image(url)['url'])
 
 
 def clear_history(update, context):
@@ -177,14 +206,16 @@ def clear_history(update, context):
     )
 
     new_message_id = update.message.message_id
-    print(new_message_id)
+
     while new_message_id > 1:
         try:
             context.bot.delete_message(
                 chat_id=update.message.chat_id, message_id=new_message_id
             )
         except Exception as error:
-            print(f'Message_id does not exist: {new_message_id} - {error}')
+            logger.info(
+                f'Message_id does not exist: {new_message_id} - {error}'
+            )
             break
         new_message_id -= 1
 
@@ -229,7 +260,7 @@ def main():
         updater.idle()
 
     except Exception as error:
-        print(f'Сбой в работе программы: {error}')
+        logger.error(f'Сбой в работе программы: {error}')
 
 
 if __name__ == '__main__':
