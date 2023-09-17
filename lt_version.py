@@ -18,15 +18,15 @@ URLS_LITE = {
 }
 
 BUTTON_LITE = (
-        ['/clear_history'],
+        # ['/clear_history'],
         ['/uniform', '/maid', ],
         ['/raiden_shogun', '/new_waifu', ],
 
 )
 
-BOT_COMMANDS_LITE = [
+BOT_COMMANDS_LITE = (
     'maid',
     'raiden_shogun',
     'uniform',
     'new_waifu',
-]
+)

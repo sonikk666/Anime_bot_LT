@@ -13,47 +13,60 @@ import time
 import requests
 from dotenv import load_dotenv
 from PIL import Image
-from telegram import Message, ReplyKeyboardMarkup
-from telegram.ext import CommandHandler, Filters, MessageHandler, Updater
+from telegram import (
+    InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+)
+from telegram.ext import (
+    CallbackQueryHandler, CommandHandler, Filters, MessageHandler, Updater
+)
 
 from exceptions import Error
+from full_version import BUTTON_FULL
+from lt_version import BOT_COMMANDS_LITE, BUTTON_LITE, URLS_LITE
 
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+TELEGRAM_GROUP_CHAT_ID = os.getenv('TELEGRAM_GROUP_CHAT_ID')
+
+# Путь для конвертирования изображений
+FILE_PATH: str = os.path.join('media', 'anime.jpg')
+FILE_PATH_RGB: str = os.path.join('media', 'anime_RGB.jpg')
+
+full = False
 
 
-def version_bot():
+def version_bot() -> tuple:
     """Определяет версию работы  бота: full или lite.
 
     Проверяя наличие файла full_version.py.
     Импортирует константы, в зависимости от версии.
     """
     if os.path.isfile('full_version.py') and os.getenv('FULL'):
-        FULL = True
-        from full_version import URLS_FULL, BUTTON_FULL, BOT_COMMANDS_FULL
+        full = True
+        from full_version import BOT_COMMANDS_FULL, BUTTON_FULL, URLS_FULL
     else:
-        FULL = False
-        from lt_version import URLS_LITE, BUTTON_LITE, BOT_COMMANDS_LITE
+        full = False
+        # from lt_version import BOT_COMMANDS_LITE, BUTTON_LITE, URLS_LITE
 
-    URLS = URLS_FULL if FULL else URLS_LITE
-    BUTTON_KEYS = BUTTON_FULL if FULL else BUTTON_LITE
-    BOT_COMMANDS = BOT_COMMANDS_FULL if FULL else BOT_COMMANDS_LITE
+    urls = URLS_FULL | URLS_LITE if full else URLS_LITE
+    button_keys = BUTTON_FULL + BUTTON_LITE if full else BUTTON_LITE
+    bot_commands = BOT_COMMANDS_FULL + BOT_COMMANDS_LITE if full else BOT_COMMANDS_LITE
 
-    return URLS, BUTTON_KEYS, BOT_COMMANDS
+    return urls, button_keys, bot_commands, full
 
 
 def get_logger():
     """Задаёт параметры логирования."""
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
-    streamHandler = logging.StreamHandler(stream=sys.stdout)
+    streamhandler = logging.StreamHandler(stream=sys.stdout)
     formatter = logging.Formatter(
         '%(asctime)s [%(levelname)s] %(message)s - %(name)s'
     )
-    logger.addHandler(streamHandler)
-    streamHandler.setFormatter(formatter)
+    logger.addHandler(streamhandler)
+    streamhandler.setFormatter(formatter)
     return logger
 
 
@@ -68,14 +81,14 @@ def say_hi(update, context):
         )
 
 
-def get_new_image(url):
+def get_new_image(url: str) -> dict:
     """Получает новую картинку."""
-    params = [
+    params = (
         'byte_size',
         'height',
         'url',
         'width',
-    ]
+    )
     while True:
         try:
             response = requests.get(url).json()
@@ -88,7 +101,7 @@ def get_new_image(url):
             tag_list = ['#'+x['name'] for x in full_info['tags']]
             image_info['tags'] = ', '.join(tag_list).upper()
 
-            logger.info(image_info)
+            # logger.info(image_info)
 
             return image_info
 
@@ -102,26 +115,24 @@ def convert_image(url_image):
     Сначала сохраняет его в папку, потом конвертирует
     и удаляет оригинал.
     """
-    path_to_file = os.path.join('media', 'anime.jpg')
-
     request = requests.get(url_image)
 
-    with open(path_to_file, 'wb') as file:
+    with open(FILE_PATH, 'wb') as file:
         file.write(request.content)
 
-    image = Image.open(path_to_file)
+    image = Image.open(FILE_PATH)
     rgb_im = image.convert('RGB')
-    rgb_im.save(os.path.join('media', 'anime_RGB.jpg'))
+    rgb_im.save(FILE_PATH_RGB)
 
-    photo = open(os.path.join(
-        os.path.join('media', 'anime_RGB.jpg')
-    ), 'rb')
-    os.remove(os.path.join('media', 'anime.jpg'))
+    # photo = open(FILE_PATH_RGB, 'rb')
+    os.remove(os.path.join(FILE_PATH))
 
-    return photo
+    return open(FILE_PATH_RGB, 'rb')
 
 
-def create_message(image_info, name_image, counter):
+def create_image_info(
+        image_info: dict, name_image: str, counter: int = 1
+) -> tuple:
     """Формирует текстовое сообщение - информацию о картинке."""
     width = image_info.get('width')
     height = image_info.get('height')
@@ -130,15 +141,17 @@ def create_message(image_info, name_image, counter):
 
     mb_size = round(byte_size / 1024 / 1024, 1)
 
+    mini_text = f'{name_image} №{counter}'
     text = (
-        f'{name_image} №{counter} {tags_image}'
+        # f'{name_image} №{counter}'
+        f'{tags_image}'
         f'\n({width}x{height} pix, {mb_size} Mb)'
     )
 
-    return text
+    return text, mini_text
 
 
-def new_image(update, context):
+def send_image(update, context) -> None:
     """Отправляет картинку в чат."""
     counter = 1
     try:
@@ -149,22 +162,31 @@ def new_image(update, context):
                 url, name = URLS.get(update.message.text)
 
                 image_info = get_new_image(url)
-                text = create_message(image_info, name, counter)
+                text, mini_text = create_image_info(image_info, name, counter)
 
                 url_image = image_info.get('url')
+                button1 = InlineKeyboardButton('Info', callback_data=text)
+                button2 = InlineKeyboardButton(
+                    'Download', callback_data=url_image
+                )
+                markup = InlineKeyboardMarkup([[button1, button2]])
 
                 # Если изображение больше 5 Мб, конвертируем его в RGB
                 if image_info['byte_size'] < 5*1024*1024:
-                    context.bot.send_photo(chat.id, url_image, text)
+                    context.bot.send_photo(
+                        chat.id, url_image, mini_text, reply_markup=markup
+                    )
                 else:
                     logger.debug(f'Попался большой файл {url_image}')
                     image_in_folder = convert_image(url_image)
 
-                    text += ' <resize>'
-                    context.bot.send_photo(chat.id, image_in_folder, text)
+                    context.bot.send_photo(
+                        chat.id, image_in_folder,
+                        caption=f'{mini_text} <resize>', reply_markup=markup
+                    )
                     image_in_folder.close()
 
-                    os.remove(os.path.join('media', 'anime_RGB.jpg'))
+                    os.remove(FILE_PATH_RGB)
 
                 time.sleep(0.2)
                 counter = counter + 1
@@ -176,34 +198,51 @@ def new_image(update, context):
         logger.info(f'{counter}')
 
 
-def wake_up(update, context):
-    """Старт бота."""
+def send_message(
+        update, context, text_message: str, start: bool = False
+) -> None:
+    """Отправка сообщения в чат."""
     chat = update.effective_chat
-    name = update.message.chat.first_name
+
     button = ReplyKeyboardMarkup([
-        ['/new_waifu', ],
+        ['/new_waifu'],
     ], resize_keyboard=True)
 
     context.bot.send_message(
         chat_id=chat.id,
-        text='Привет, {}. Посмотри, что я нашёл.'.format(name),
+        text=text_message,
         reply_markup=button
     )
+
+    # Если вызов из функции Start_bot, то отправить изображение
+    # и отрисовать кнопку
+    if start:
+        url = URLS.get('/new_waifu')[0]
+        image = get_new_image(url)['url']
+        button2 = InlineKeyboardButton('Download', callback_data=image)
+        markup = InlineKeyboardMarkup([[button2]])
+        context.bot.send_photo(chat.id, image, reply_markup=markup)
+
+
+def start_bot(update, context):
+    """Старт бота."""
+    name = update.message.chat.first_name
+    text = 'Привет, {}. Посмотри, что я нашёл.'.format(name)
+    send_message(update, context, text, start=True)
+
     url = URLS.get('/new_waifu')[0]
-    context.bot.send_photo(chat.id, get_new_image(url)['url'])
+    image = get_new_image(url)['url']
+    button2 = InlineKeyboardButton('Download', callback_data=image)
+    markup = InlineKeyboardMarkup([[button2]])
+    context.bot.send_photo(
+        chat_id=TELEGRAM_GROUP_CHAT_ID, photo=image, reply_markup=markup
+    )
 
 
 def clear_history(update, context):
     """Очищает историю сообщений и выходит из tags_mode."""
-    chat = update.effective_chat
-    button = ReplyKeyboardMarkup([
-        ['/new_waifu'],
-    ], resize_keyboard=True)
-    context.bot.send_message(
-        chat_id=chat.id,
-        text='You have cleared the history.',
-        reply_markup=button
-    )
+    text = 'You have cleared the history.'
+    send_message(update, context, text)
 
     new_message_id = update.message.message_id
 
@@ -220,10 +259,10 @@ def clear_history(update, context):
         new_message_id -= 1
 
 
-def tags_mode(update, context):
+def tags_mode(update, context) -> None:
     """Выводит на экран бота дополнительные кнопки запросов."""
     chat = update.effective_chat
-    button = ReplyKeyboardMarkup(BUTTON_KEYS, resize_keyboard=True)
+    button = ReplyKeyboardMarkup(BUTTON_LITE, resize_keyboard=True)
     context.bot.send_message(
         chat_id=chat.id,
         text='tags_mode activated.',
@@ -231,30 +270,66 @@ def tags_mode(update, context):
     )
 
 
+def button(update, context) -> None:
+    """Кнопки."""
+    query = update.callback_query
+
+    data = query.data
+
+    chat = update.effective_chat
+    message = update.effective_message
+
+    query.answer()
+
+    if 'pix' in data:
+        context.bot.edit_message_caption(
+            chat_id=chat.id,
+            message_id=message.message_id,
+            caption=data,
+            # reply_markup=markup
+            # reply_markup=button
+        )
+    elif 'http' in data:
+        context.bot.send_document(chat.id, data)
+
+
+def full_v(update, context) -> None:
+    chat = update.effective_chat
+    button = ReplyKeyboardMarkup(BUTTON_FULL, resize_keyboard=True)
+    context.bot.send_message(
+        chat_id=chat.id,
+        text='full_mode activated.',
+        reply_markup=button
+    )
+
+
 def main():
     """Главная работа бота."""
+    # Словарь для команд бота
+    commands = {
+        'start': start_bot,
+        'tags_mode': tags_mode,
+        'clear_history': clear_history,
+        LIST: send_image,
+    }
+    if full:
+        commands['full'] = full_v
+
     try:
         updater = Updater(token=TELEGRAM_TOKEN)
-        updater.dispatcher.add_handler(CommandHandler(
-            command='start', callback=wake_up,
-            filters=Filters.user(user_id=int(TELEGRAM_CHAT_ID))
-        ))
-        updater.dispatcher.add_handler(CommandHandler(
-            'tags_mode', tags_mode,
-            Filters.user(user_id=int(TELEGRAM_CHAT_ID))
-        ))
-        updater.dispatcher.add_handler(CommandHandler(
-            LIST, new_image,
-            Filters.user(user_id=int(TELEGRAM_CHAT_ID))
-        ))
-        updater.dispatcher.add_handler(CommandHandler(
-            'clear_history', clear_history,
-            Filters.user(user_id=int(TELEGRAM_CHAT_ID))
-        ))
-        updater.dispatcher.add_handler(MessageHandler(
+        app = updater.dispatcher
+
+        # Загружаем список команд из словаря
+        for key, value in commands.items():
+            app.add_handler(CommandHandler(
+                command=key, callback=value,
+                filters=Filters.user(user_id=int(TELEGRAM_CHAT_ID))
+            ))
+        app.add_handler(MessageHandler(
             Filters.text, say_hi,
             Filters.user(user_id=int(TELEGRAM_CHAT_ID))
         ))
+        app.add_handler(CallbackQueryHandler(button))
 
         updater.start_polling()
         updater.idle()
@@ -265,7 +340,7 @@ def main():
 
 if __name__ == '__main__':
     logger = get_logger()
-    URLS, BUTTON_KEYS, LIST = version_bot()
+    URLS, BUTTON_KEYS, LIST, full = version_bot()
     try:
         logger.info('Запуск программы')
         main()

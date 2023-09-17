@@ -3,6 +3,7 @@
 .vscode/
 /media
 full_version.py
+Dockerfile
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
