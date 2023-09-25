@@ -31,8 +31,9 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 TELEGRAM_GROUP_CHAT_ID = os.getenv('TELEGRAM_GROUP_CHAT_ID')
 
 # Путь для конвертирования изображений
+now_time = time.time()
 FILE_PATH: str = os.path.join('media', 'anime.jpg')
-FILE_PATH_RGB: str = os.path.join('media', 'anime_RGB.jpg')
+FILE_PATH_RGB: str = os.path.join('media', f'anime_RGB_{now_time}.jpg')
 
 full = False
 
@@ -52,7 +53,10 @@ def version_bot() -> tuple:
 
     urls = URLS_FULL | URLS_LITE if full else URLS_LITE
     button_keys = BUTTON_FULL + BUTTON_LITE if full else BUTTON_LITE
-    bot_commands = BOT_COMMANDS_FULL + BOT_COMMANDS_LITE if full else BOT_COMMANDS_LITE
+    bot_commands = (
+        BOT_COMMANDS_FULL + BOT_COMMANDS_LITE
+        if full else BOT_COMMANDS_LITE
+    )
 
     return urls, button_keys, bot_commands, full
 
@@ -192,7 +196,7 @@ def send_image(update, context) -> None:
                 counter = counter + 1
 
             except Exception as error:
-                logger.error(f'Вложенная ошибка {error}')
+                logger.error(f'Вложенная ошибка - {error} - для {url_image}')
     except Exception as error:
         logger.error(f'Ошибка в new_image {error}')
         logger.info(f'{counter}')
@@ -294,6 +298,7 @@ def button(update, context) -> None:
 
 
 def full_v(update, context) -> None:
+    """Включение кнопок полной версии."""
     chat = update.effective_chat
     button = ReplyKeyboardMarkup(BUTTON_FULL, resize_keyboard=True)
     context.bot.send_message(
