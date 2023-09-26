@@ -34,7 +34,7 @@ TELEGRAM_GROUP_CHAT_ID = os.getenv('TELEGRAM_GROUP_CHAT_ID')
 now_time = time.time()
 FILE_PATH: str = os.path.join('media', 'anime.jpg')
 FILE_PATH_RGB: str = os.path.join('media', f'anime_RGB_{now_time}.jpg')
-
+folder: str = os.path.join('media')
 full = False
 
 
@@ -120,6 +120,9 @@ def convert_image(url_image):
     и удаляет оригинал.
     """
     request = requests.get(url_image)
+
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
 
     with open(FILE_PATH, 'wb') as file:
         file.write(request.content)
@@ -297,15 +300,20 @@ def button(update, context) -> None:
         context.bot.send_document(chat.id, data)
 
 
-def full_v(update, context) -> None:
+def full_version_on(update, context) -> None:
     """Включение кнопок полной версии."""
     chat = update.effective_chat
-    button = ReplyKeyboardMarkup(BUTTON_FULL, resize_keyboard=True)
-    context.bot.send_message(
-        chat_id=chat.id,
-        text='full_mode activated.',
-        reply_markup=button
-    )
+    if chat.id == int(TELEGRAM_CHAT_ID):
+        button = ReplyKeyboardMarkup(BUTTON_FULL, resize_keyboard=True)
+        context.bot.send_message(
+            chat_id=chat.id,
+            text='full_mode activated.',
+            reply_markup=button
+        )
+    else:
+        context.bot.send_message(
+            chat_id=chat.id, text='Извините, у Вас нет доступа!'
+        )
 
 
 def main():
@@ -318,7 +326,7 @@ def main():
         LIST: send_image,
     }
     if full:
-        commands['full'] = full_v
+        commands['full'] = full_version_on
 
     try:
         updater = Updater(token=TELEGRAM_TOKEN)
