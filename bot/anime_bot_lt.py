@@ -49,7 +49,6 @@ def version_bot() -> tuple:
         from full_version import BOT_COMMANDS_FULL, BUTTON_FULL, URLS_FULL
     else:
         full = False
-        # from lt_version import BOT_COMMANDS_LITE, BUTTON_LITE, URLS_LITE
 
     urls = URLS_FULL | URLS_LITE if full else URLS_LITE
     button_keys = BUTTON_FULL + BUTTON_LITE if full else BUTTON_LITE
@@ -75,14 +74,12 @@ def get_logger():
 
 
 def say_hi(update, context):
-    """Приветствие бота."""
+    """Приветствие бота.
+
+    Ответ бота на любое сообщение.
+    """
     chat = update.effective_chat
-    if chat.id == int(TELEGRAM_CHAT_ID):
-        context.bot.send_message(chat_id=chat.id, text='Привет, я АнимеБот!')
-    else:
-        context.bot.send_message(
-            chat_id=chat.id, text='Извините, у Вас нет доступа!'
-        )
+    context.bot.send_message(chat_id=chat.id, text='Привет, я АнимеБот!')
 
 
 def get_new_image(url: str) -> dict:
@@ -229,6 +226,10 @@ def send_message(
         button2 = InlineKeyboardButton('Download', callback_data=image)
         markup = InlineKeyboardMarkup([[button2]])
         context.bot.send_photo(chat.id, image, reply_markup=markup)
+        # Отправить фото в чат группы
+        context.bot.send_photo(
+            chat_id=TELEGRAM_GROUP_CHAT_ID, photo=image, reply_markup=markup
+        )
 
 
 def start_bot(update, context):
@@ -236,14 +237,6 @@ def start_bot(update, context):
     name = update.message.chat.first_name
     text = 'Привет, {}. Посмотри, что я нашёл.'.format(name)
     send_message(update, context, text, start=True)
-
-    url = URLS.get('/new_waifu')[0]
-    image = get_new_image(url)['url']
-    button2 = InlineKeyboardButton('Download', callback_data=image)
-    markup = InlineKeyboardMarkup([[button2]])
-    context.bot.send_photo(
-        chat_id=TELEGRAM_GROUP_CHAT_ID, photo=image, reply_markup=markup
-    )
 
 
 def clear_history(update, context):
@@ -326,7 +319,7 @@ def main():
         LIST: send_image,
     }
     if full:
-        commands['full'] = full_version_on
+        commands['paid'] = full_version_on
 
     try:
         updater = Updater(token=TELEGRAM_TOKEN)
@@ -336,7 +329,6 @@ def main():
         for key, value in commands.items():
             app.add_handler(CommandHandler(
                 command=key, callback=value,
-                filters=Filters.user(user_id=int(TELEGRAM_CHAT_ID))
             ))
         app.add_handler(MessageHandler(
             Filters.text, say_hi,
